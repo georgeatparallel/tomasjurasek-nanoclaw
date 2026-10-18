@@ -63,7 +63,8 @@ test('saved provider and project overrides resolve without editing settings', (t
   assert.deepEqual(value.disallowedTools, [
     'WebSearch',
     'WebFetch',
-    'mcp__parallel-search__*',
+    'mcp__parallel-search__web_search',
+    'mcp__parallel-search__web_fetch',
   ]);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
 });

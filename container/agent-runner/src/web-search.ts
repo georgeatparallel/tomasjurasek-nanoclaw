@@ -157,7 +157,7 @@ export function resolveWebSearch({
     return {
       provider,
       allowedTools: [],
-      disallowedTools: [...NATIVE_TOOLS, `mcp__${SERVER}__*`],
+      disallowedTools: [...NATIVE_TOOLS, ...PARALLEL_TOOLS],
       mcpServers: {},
     };
   }

@@ -98,6 +98,8 @@ async function exercise(
     deny = false,
     legacyDisable = false,
     settingsCredential = false,
+    savedServer = false,
+    forceCall = false,
   } = {},
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-sdk-search-'));
@@ -179,7 +181,9 @@ async function exercise(
     const stop = mode !== 'success' && results.length > 0;
     const step = steps[results.length];
     const content =
-      search.provider === 'disabled' || search.provider === 'native'
+      !forceCall &&
+      !legacyDisable &&
+      (search.provider === 'disabled' || search.provider === 'native')
         ? { type: 'text', text: 'Routing inspected.' }
         : !stop && step
           ? {
@@ -203,7 +207,7 @@ async function exercise(
     );
   }
   // Exercise a saved server override through the resolver, not a rewritten result.
-  if (provider === 'parallel' && !settingsCredential) {
+  if ((provider === 'parallel' || savedServer) && !settingsCredential) {
     fs.writeFileSync(
       path.join(cwd, '.mcp.json'),
       JSON.stringify({
@@ -250,6 +254,9 @@ async function exercise(
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
     MCP_TOOL_TIMEOUT: mode === 'timeout' ? '200' : '5000',
+    // Reproduce the runner's existing permission mode. Only scripted model
+    // responses and local fixture tools execute in these tests.
+    ...(process.getuid?.() === 0 ? { IS_SANDBOX: '1' } : {}),
   };
   const timer = setTimeout(() => abortController.abort(), 30000);
   try {
@@ -265,6 +272,8 @@ async function exercise(
         systemPrompt: search.instruction,
         abortController,
         maxTurns: 4,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
       },
     });
     for await (const message of conversation) {
@@ -422,5 +431,30 @@ test(
     const names = run.modelRequests.at(-1).tools.map((tool) => tool.name);
     assert.ok(names.includes('WebSearch'));
     assert.ok(!names.some((name) => name.startsWith('mcp__parallel-search__')));
+  },
+);
+
+test(
+  'disabled search excludes saved Parallel tools even if the model attempts a call',
+  { timeout: 35000 },
+  async (t) => {
+    const run = await exercise(t, {
+      provider: 'disabled',
+      savedServer: true,
+      forceCall: true,
+      mode: 'error',
+    });
+    assert.equal(run.failure, undefined);
+    assert.equal(
+      run.requests.filter((r) => r.method === 'tools/call').length,
+      0,
+    );
+    assert.match(run.result.result, /No such tool available/);
+    for (const request of run.modelRequests)
+      assert.ok(
+        !request.tools.some((tool) =>
+          tool.name.startsWith('mcp__parallel-search__'),
+        ),
+      );
   },
 );
