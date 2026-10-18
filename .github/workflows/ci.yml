@@ -23,3 +23,9 @@ jobs:
 
       - name: Tests
         run: npx vitest run
+
+      - name: Agent runner tests
+        working-directory: container/agent-runner
+        run: |
+          npm ci
+          npm test

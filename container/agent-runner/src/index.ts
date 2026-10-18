@@ -23,6 +23,7 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { resolveWebSearch } from './web-search.js';
 
 interface ContainerInput {
   prompt: string;
@@ -435,6 +436,12 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const search = resolveWebSearch({ cwd: '/workspace/group', env: sdkEnv });
+  const systemAppend = [globalClaudeMd, search.instruction]
+    .filter(Boolean)
+    .join('\n\n');
+  log(`Web search provider: ${search.provider}`);
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -442,11 +449,11 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
+      systemPrompt: systemAppend
         ? {
             type: 'preset' as const,
             preset: 'claude_code' as const,
-            append: globalClaudeMd,
+            append: systemAppend,
           }
         : undefined,
       allowedTools: [
@@ -456,8 +463,7 @@ async function runQuery(
         'Edit',
         'Glob',
         'Grep',
-        'WebSearch',
-        'WebFetch',
+        ...search.allowedTools,
         'Task',
         'TaskOutput',
         'TaskStop',
@@ -470,11 +476,13 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
       ],
+      disallowedTools: search.disallowedTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
+        ...search.mcpServers,
         nanoclaw: {
           command: 'node',
           args: [mcpServerPath],

@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test test/web-search.mjs test/sdk-search.mjs",
     "start": "node dist/index.js"
   },
   "dependencies": {
