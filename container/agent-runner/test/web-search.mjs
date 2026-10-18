@@ -118,6 +118,60 @@ test('a saved MCP disable takes precedence over selecting Parallel', (t) => {
   assert.deepEqual(f.resolve().mcpServers, {});
 });
 
+for (const scope of ['user', 'local']) {
+  test(`legacy ${scope} MCP rejection is authoritative before SDK migration`, (t) => {
+    const f = fixture(t);
+    const value = { disabledMcpjsonServers: ['parallel-search'] };
+    f.put(
+      path.join(f.home, '.claude.json'),
+      scope === 'user' ? value : { projects: { [f.cwd]: value } },
+    );
+    assert.equal(f.resolve().provider, 'native');
+    f.choose('parallel');
+    assert.equal(f.resolve().provider, 'disabled');
+    assert.deepEqual(f.resolve().mcpServers, {});
+  });
+}
+
+test('legacy explicit MCP enables retain routing while generated empty defaults do not select native', (t) => {
+  const f = fixture(t);
+  const file = path.join(f.home, '.claude.json');
+  f.put(file, {
+    projects: { [f.cwd]: { enabledMcpjsonServers: ['existing'] } },
+  });
+  assert.equal(f.resolve().provider, 'native');
+  f.put(file, { enableAllProjectMcpServers: true });
+  assert.equal(f.resolve().provider, 'native');
+  f.put(file, {
+    projects: {
+      [f.cwd]: {
+        enabledMcpjsonServers: [],
+        disabledMcpjsonServers: [],
+        enableAllProjectMcpServers: false,
+      },
+    },
+  });
+  assert.equal(f.resolve().provider, 'parallel');
+});
+
+test('settings credentials preserve routing and explicit auth uses local settings precedence', (t) => {
+  const f = fixture(t);
+  f.put(path.join(f.home, '.claude/settings.json'), {
+    env: { PARALLEL_API_KEY: 'user-choice' },
+  });
+  assert.equal(f.resolve().provider, 'native');
+  f.put(path.join(f.cwd, '.claude/settings.local.json'), {
+    env: { PARALLEL_API_KEY: 'local-choice' },
+  });
+  f.choose('parallel');
+  assert.equal(
+    f.resolve({ PARALLEL_API_KEY: 'process-choice' }).mcpServers[
+      'parallel-search'
+    ].headers.Authorization,
+    'Bearer local-choice',
+  );
+});
+
 test('intentional search credentials keep existing routing; explicit Parallel uses its key', (t) => {
   const f = fixture(t);
   for (const key of [

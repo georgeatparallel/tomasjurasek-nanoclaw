@@ -20,6 +20,9 @@ interface SavedSettings {
   projects?: Record<string, SavedSettings>;
   disabledMcpServers?: string[];
   disabledMcpjsonServers?: string[];
+  enabledMcpjsonServers?: string[];
+  enableAllProjectMcpServers?: boolean;
+  env?: NodeJS.ProcessEnv;
   permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
 }
 
@@ -108,17 +111,32 @@ export function resolveWebSearch({
   const disabled = [
     ...(user.disabledMcpServers ?? []),
     ...(local.disabledMcpServers ?? []),
+    ...(user.disabledMcpjsonServers ?? []),
+    ...(local.disabledMcpjsonServers ?? []),
     ...settings.flatMap((config) => config.disabledMcpjsonServers ?? []),
   ];
+  // Older SDKs stored project MCP consent in .claude.json before migrating it
+  // to settings.local.json. Empty lists/false are also SDK-generated defaults.
+  const hasLegacyConsent = [user, local].some(
+    (config) =>
+      (config.enabledMcpjsonServers?.length ?? 0) > 0 ||
+      config.enableAllProjectMcpServers === true,
+  );
+  const searchEnv = Object.assign(
+    {},
+    env,
+    ...settings.map((config) => config.env),
+  );
   const hasCredentials = [
     'PARALLEL_API_KEY',
     'BRAVE_API_KEY',
     'TAVILY_API_KEY',
     'EXA_API_KEY',
-  ].some((key) => Boolean(env[key]));
+  ].some((key) => Boolean(searchEnv[key]));
   const savedChoice =
     Object.keys(servers).length > 0 ||
     hasPermissions ||
+    hasLegacyConsent ||
     disabled.length > 0 ||
     hasCredentials;
   let provider = (selected ??
@@ -147,8 +165,8 @@ export function resolveWebSearch({
   const server: McpServerConfig = servers[SERVER] ?? {
     type: 'http',
     url: SEARCH_URL,
-    headers: env.PARALLEL_API_KEY
-      ? { Authorization: `Bearer ${env.PARALLEL_API_KEY}` }
+    headers: searchEnv.PARALLEL_API_KEY
+      ? { Authorization: `Bearer ${searchEnv.PARALLEL_API_KEY}` }
       : {},
   };
   // Preserve intentionally configured URLs, authentication and transport.

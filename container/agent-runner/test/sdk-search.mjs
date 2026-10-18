@@ -92,7 +92,13 @@ function streamResponse(res, model, content) {
 
 async function exercise(
   t,
-  { mode = 'success', provider = 'parallel', deny = false } = {},
+  {
+    mode = 'success',
+    provider = 'parallel',
+    deny = false,
+    legacyDisable = false,
+    settingsCredential = false,
+  } = {},
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-sdk-search-'));
   const home = path.join(root, 'home'),
@@ -173,7 +179,7 @@ async function exercise(
     const stop = mode !== 'success' && results.length > 0;
     const step = steps[results.length];
     const content =
-      provider === 'disabled' || provider === 'native'
+      search.provider === 'disabled' || search.provider === 'native'
         ? { type: 'text', text: 'Routing inspected.' }
         : !stop && step
           ? {
@@ -190,14 +196,14 @@ async function exercise(
   });
   await new Promise((resolve) => fixture.listen(0, '127.0.0.1', resolve));
   const endpoint = `http://127.0.0.1:${fixture.address().port}`;
-  if (provider !== 'native') {
+  if (provider !== 'native' && !settingsCredential) {
     fs.writeFileSync(
       path.join(home, '.claude/nanoclaw-search.json'),
       JSON.stringify({ provider }),
     );
   }
   // Exercise a saved server override through the resolver, not a rewritten result.
-  if (provider === 'parallel') {
+  if (provider === 'parallel' && !settingsCredential) {
     fs.writeFileSync(
       path.join(cwd, '.mcp.json'),
       JSON.stringify({
@@ -219,6 +225,18 @@ async function exercise(
       JSON.stringify({
         permissions: { deny: ['mcp__parallel-search__web_search'] },
       }),
+    );
+  if (legacyDisable)
+    fs.writeFileSync(
+      path.join(home, '.claude.json'),
+      JSON.stringify({
+        projects: { [cwd]: { disabledMcpjsonServers: ['parallel-search'] } },
+      }),
+    );
+  if (settingsCredential)
+    fs.writeFileSync(
+      path.join(home, '.claude/settings.json'),
+      JSON.stringify({ env: { PARALLEL_API_KEY: 'saved-fixture-key' } }),
     );
   const search = resolveWebSearch({ cwd, home, env: {} });
   const env = {
@@ -371,5 +389,38 @@ test(
         ),
       );
     }
+  },
+);
+
+test(
+  'real SDK does not bypass a legacy saved MCP rejection',
+  { timeout: 35000 },
+  async (t) => {
+    const run = await exercise(t, { legacyDisable: true, mode: 'error' });
+    assert.equal(run.failure, undefined);
+    assert.equal(
+      run.requests.filter((r) => r.method === 'tools/call').length,
+      0,
+    );
+    for (const request of run.modelRequests)
+      assert.ok(
+        !request.tools.some((tool) =>
+          tool.name.startsWith('mcp__parallel-search__'),
+        ),
+      );
+  },
+);
+
+test(
+  'settings-provided credentials keep native routing without anonymous requests',
+  { timeout: 35000 },
+  async (t) => {
+    const run = await exercise(t, { settingsCredential: true });
+    assert.equal(run.failure, undefined);
+    assert.equal(run.result.subtype, 'success');
+    assert.equal(run.requests.length, 0);
+    const names = run.modelRequests.at(-1).tools.map((tool) => tool.name);
+    assert.ok(names.includes('WebSearch'));
+    assert.ok(!names.some((name) => name.startsWith('mcp__parallel-search__')));
   },
 );
